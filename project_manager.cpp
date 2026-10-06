@@ -14,6 +14,7 @@
 #define ID_LIST_PROCESSES       1002
 #define ID_BUTTON_TERMINATE     1003
 #define ID_TIMER_REFRESH        1
+#define ID_TIMER_TERMINATING    2
 
 // Global Variables:
 HINSTANCE hInst;                                // current instance
@@ -25,6 +26,7 @@ std::vector<Process> previousProcesses;
 std::vector<Process> currentProcesses; // Global variable to hold the current list of processes
 std::uint32_t selectedProcessId = 0;
 HWND hProcessNameLabel;
+HANDLE terminatingProcessHandle = nullptr;
 
 
 // Forward declarations of functions included in this code module:
@@ -140,18 +142,19 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 //
 // PURPOSE: Refreshes the list of processes displayed in the list view.
 //
-static void RefreshProcessList() {
-    // Clear the existing items in the list view
+static void RefreshProcessList()
+{
     ListView_DeleteAllItems(hProcessList);
 
-    // Here we will handle the refresh button click event.
     currentProcesses = processManager.GetProcesses();
 
-    if (previousProcesses.empty()) {
-		previousProcesses = currentProcesses; // Initialize previousProcesses on first run
+    if (previousProcesses.empty())
+    {
+        previousProcesses = currentProcesses;
     }
-    else {
-        // Compare the new list of processes with the previous one to detect new processes
+    else
+    {
+        // Detectar nuevos procesos
         for (const auto& current : currentProcesses)
         {
             bool found = false;
@@ -167,45 +170,37 @@ static void RefreshProcessList() {
 
             if (!found)
             {
-                // Proceso nuevo
-                MessageBoxW(
-                    hProcessList,
-                    current.name.c_str(),
-                    L"Nuevo proceso detectado",
-                    MB_OK
-                );
+                // Proceso nuevo detectado
             }
         }
 
-		// Compare the previous list of processes with the new one to detect terminated processes
-        for (const auto& prevState : previousProcesses)
+        // Detectar procesos terminados
+        for (const auto& previous : previousProcesses)
         {
             bool found = false;
+
             for (const auto& current : currentProcesses)
             {
-                if (prevState.pid == current.pid)
+                if (previous.pid == current.pid)
                 {
                     found = true;
                     break;
                 }
             }
+
             if (!found)
             {
-                                // Proceso terminado
-                MessageBoxW(
-                    hProcessList,
-                    prevState.name.c_str(),
-                    L"Proceso terminado detectado",
-                    MB_OK
-				);
+                // Proceso terminado detectado
             }
         }
     }
 
-	// Populate the list view with the current processes
-    PopulateProcessList(hProcessList, currentProcesses);
+    PopulateProcessList(
+        hProcessList,
+        currentProcesses
+    );
 
-	previousProcesses = currentProcesses; // Update previousProcesses for the next refresh
+    previousProcesses = currentProcesses;
 }
 
 //
@@ -397,7 +392,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                     if (result == IDYES)
                     {
                         HANDLE processHandle = OpenProcess(
-                            PROCESS_TERMINATE,
+                            PROCESS_TERMINATE | SYNCHRONIZE,
                             FALSE,
                             selectedProcessId
                         );
@@ -405,18 +400,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         if (processHandle == nullptr)
                         {
                             DWORD error = GetLastError();
+
+                            ProcessManager processManager;
+
                             std::wstring windowsError =
                                 processManager.GetWindowsErrorMessage(error);
 
-                            std::wstring message =
+                            std::wstring errorMessage =
                                 L"No se pudo abrir el proceso.\n\n"
                                 L"Código: " + std::to_wstring(error) +
                                 L"\n" + windowsError;
 
                             MessageBoxW(
                                 hWnd,
-                                message.c_str(),
-                                L"Error",
+                                errorMessage.c_str(),
+                                L"Error al abrir el proceso",
                                 MB_OK | MB_ICONERROR
                             );
                         }
@@ -424,30 +422,45 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                         {
                             if (TerminateProcess(processHandle, 0))
                             {
-                                // Éxito
                                 selectedProcessId = 0;
-                                SetWindowTextW(hProcessNameLabel, L"Selecciona un proceso");
-                                RefreshProcessList();
+
+                                SetWindowTextW(
+                                    hProcessNameLabel,
+                                    L"Selecciona un proceso"
+                                );
+
+                                terminatingProcessHandle = processHandle;
+
+                                SetTimer(
+                                    hWnd,
+                                    ID_TIMER_TERMINATING,
+                                    50,
+                                    nullptr
+                                );
                             }
                             else
                             {
                                 DWORD error = GetLastError();
+
+                                ProcessManager processManager;
+
                                 std::wstring windowsError =
                                     processManager.GetWindowsErrorMessage(error);
-                                std::wstring message =
+
+                                std::wstring errorMessage =
                                     L"No se pudo finalizar el proceso.\n\n"
                                     L"Código: " + std::to_wstring(error) +
                                     L"\n" + windowsError;
 
                                 MessageBoxW(
                                     hWnd,
-                                    message.c_str(),
+                                    errorMessage.c_str(),
                                     L"Error al finalizar el proceso",
                                     MB_OK | MB_ICONERROR
                                 );
-                            }
 
-                            CloseHandle(processHandle);
+                                CloseHandle(processHandle);
+                            }
                         }
                     }
 
@@ -513,13 +526,50 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     }
         break;
     case WM_TIMER:
-        if (wParam == ID_TIMER_REFRESH) {
+    {
+        if (wParam == ID_TIMER_REFRESH)
+        {
             RefreshProcessList();
         }
+        else if (wParam == ID_TIMER_TERMINATING)
+        {
+            if (terminatingProcessHandle != nullptr)
+            {
+                DWORD result = WaitForSingleObject(
+                    terminatingProcessHandle,
+                    0
+                );
+
+                if (result == WAIT_OBJECT_0)
+                {
+                    KillTimer(hWnd, ID_TIMER_TERMINATING);
+
+                    CloseHandle(terminatingProcessHandle);
+
+                    terminatingProcessHandle = nullptr;
+
+                    RefreshProcessList();
+                }
+            }
+        }
+
         break;
+    }
     case WM_DESTROY:
+    {
+        KillTimer(hWnd, ID_TIMER_REFRESH);
+        KillTimer(hWnd, ID_TIMER_TERMINATING);
+
+        if (terminatingProcessHandle != nullptr)
+        {
+            CloseHandle(terminatingProcessHandle);
+            terminatingProcessHandle = nullptr;
+        }
+
         PostQuitMessage(0);
+
         break;
+    }
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
