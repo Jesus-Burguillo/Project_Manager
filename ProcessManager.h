@@ -16,4 +16,5 @@ struct Process {
 class ProcessManager {
 public:
 	std::vector<Process> GetProcesses();
+	std::wstring GetWindowsErrorMessage(std::uint32_t error);
 };

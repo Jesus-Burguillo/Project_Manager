@@ -101,3 +101,25 @@ std::vector<Process> ProcessManager::GetProcesses()
 
     return processes;
 }
+
+std::wstring ProcessManager::GetWindowsErrorMessage(std::uint32_t error)
+{
+    wchar_t errorMessage[512];
+
+    DWORD result = FormatMessageW(
+        FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr,
+        error,
+        0,
+        errorMessage,
+        512,
+        nullptr
+    );
+
+    if (result == 0)
+    {
+        return L"Error de Windows desconocido.";
+    }
+
+    return errorMessage;
+}

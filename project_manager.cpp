@@ -10,9 +10,10 @@
 
 #pragma comment(lib, "Comctl32.lib")
 
-#define ID_BUTTON_REFRESH 1001
-#define ID_LIST_PROCESSES 1002
-#define ID_TIMER_REFRESH 1
+#define ID_BUTTON_REFRESH       1001
+#define ID_LIST_PROCESSES       1002
+#define ID_BUTTON_TERMINATE     1003
+#define ID_TIMER_REFRESH        1
 
 // Global Variables:
 HINSTANCE hInst;                                // current instance
@@ -22,6 +23,8 @@ ProcessManager processManager; // Instance of ProcessManager
 HWND hProcessList;
 std::vector<Process> previousProcesses;
 std::vector<Process> currentProcesses; // Global variable to hold the current list of processes
+std::uint32_t selectedProcessId = 0;
+HWND hProcessNameLabel;
 
 
 // Forward declarations of functions included in this code module:
@@ -216,8 +219,8 @@ static void CreateTable(HWND hWnd) {
         WC_LISTVIEW,
         L"",
         WS_CHILD | WS_VISIBLE | WS_BORDER | LVS_REPORT,
-        20, 60,
-        1024, 300,
+        20, 100,
+        1024, 400,
         hWnd,
         (HMENU)ID_LIST_PROCESSES,
         hInst,
@@ -299,11 +302,37 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             nullptr
         );
 
+		// Create the button to refresh the process list
+        CreateWindowW(L"BUTTON", L"Actualizar", WS_CHILD | WS_VISIBLE, 20, 60, 100, 30, hWnd, (HMENU)ID_BUTTON_REFRESH, hInst, nullptr);
+
 		// Create the list view to display processes
 		CreateTable(hWnd);
 
-		// Create the button to refresh the process list
-        CreateWindowW(L"BUTTON", L"Actualizar", WS_CHILD | WS_VISIBLE, 20, 380, 100, 30, hWnd, (HMENU)ID_BUTTON_REFRESH, hInst, nullptr);
+        // Create the section to display the process info
+        hProcessNameLabel = CreateWindowW(
+            L"STATIC",
+            L"Selecciona un proceso",
+            WS_CHILD | WS_VISIBLE,
+            20, 540,
+            220, 80,
+            hWnd,
+            nullptr,
+            hInst,
+            nullptr
+        );
+
+        // Create the button to terminate a process
+        CreateWindowW(
+            L"BUTTON",
+            L"Finalizar proceso",
+            WS_CHILD | WS_VISIBLE,
+            150, 60,
+            150, 30,
+            hWnd,
+            (HMENU)ID_BUTTON_TERMINATE,
+            hInst,
+            nullptr
+        );
         }
 
 		SetTimer(hWnd, ID_TIMER_REFRESH, 1000 * 60 * 5, nullptr); // Set a timer to refresh every 5 minutes
@@ -317,6 +346,113 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 case ID_BUTTON_REFRESH:
                     RefreshProcessList();
 				break;
+                case ID_BUTTON_TERMINATE:
+                {
+                    const Process* selectedProcess = nullptr;
+
+                    if (selectedProcessId == 0)
+                    {
+                        MessageBoxW(
+                            hWnd,
+                            L"No hay ningún proceso seleccionado.",
+                            L"Finalizar proceso",
+                            MB_OK | MB_ICONINFORMATION
+                        );
+
+                        break;
+                    }
+
+                    for (const auto& process : currentProcesses)
+                    {
+                        if (process.pid == selectedProcessId)
+                        {
+                            selectedProcess = &process;
+                            break;
+                        }
+                    }
+
+                    if (selectedProcess == nullptr)
+                    {
+                        MessageBoxW(
+                            hWnd,
+                            L"El proceso seleccionado ya no está disponible.",
+                            L"Finalizar proceso",
+                            MB_OK | MB_ICONWARNING
+                        );
+
+                        break;
+                    }
+
+                    std::wstring message =
+                        L"¿Seguro que quieres finalizar el proceso?\n\n" +
+                        selectedProcess->name;
+
+                    int result = MessageBoxW(
+                        hWnd,
+                        message.c_str(),
+                        L"Confirmar finalización",
+                        MB_YESNO | MB_ICONWARNING
+                    );
+
+                    if (result == IDYES)
+                    {
+                        HANDLE processHandle = OpenProcess(
+                            PROCESS_TERMINATE,
+                            FALSE,
+                            selectedProcessId
+                        );
+
+                        if (processHandle == nullptr)
+                        {
+                            DWORD error = GetLastError();
+                            std::wstring windowsError =
+                                processManager.GetWindowsErrorMessage(error);
+
+                            std::wstring message =
+                                L"No se pudo abrir el proceso.\n\n"
+                                L"Código: " + std::to_wstring(error) +
+                                L"\n" + windowsError;
+
+                            MessageBoxW(
+                                hWnd,
+                                message.c_str(),
+                                L"Error",
+                                MB_OK | MB_ICONERROR
+                            );
+                        }
+                        else
+                        {
+                            if (TerminateProcess(processHandle, 0))
+                            {
+                                // Éxito
+                                selectedProcessId = 0;
+                                SetWindowTextW(hProcessNameLabel, L"Selecciona un proceso");
+                                RefreshProcessList();
+                            }
+                            else
+                            {
+                                DWORD error = GetLastError();
+                                std::wstring windowsError =
+                                    processManager.GetWindowsErrorMessage(error);
+                                std::wstring message =
+                                    L"No se pudo finalizar el proceso.\n\n"
+                                    L"Código: " + std::to_wstring(error) +
+                                    L"\n" + windowsError;
+
+                                MessageBoxW(
+                                    hWnd,
+                                    message.c_str(),
+                                    L"Error al finalizar el proceso",
+                                    MB_OK | MB_ICONERROR
+                                );
+                            }
+
+                            CloseHandle(processHandle);
+                        }
+                    }
+
+                    break;
+                }
             }
         }
         break;
@@ -337,12 +473,40 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			// Handle notifications from the list view if needed
             if (header->code == LVN_ITEMCHANGED)
             {
-				// Handle item changed event if needed
-                NMLISTVIEW* listView = reinterpret_cast<NMLISTVIEW*>(lParam);
+                NMLISTVIEW* listView =
+                    reinterpret_cast<NMLISTVIEW*>(lParam);
+
                 if ((listView->uNewState & LVIS_SELECTED) != 0)
                 {
-                    // An item was selected, you can handle it here if needed
                     int selectedIndex = listView->iItem;
+
+                    selectedProcessId =
+                        currentProcesses[selectedIndex].pid;
+
+                    const Process* selectedProcess = nullptr;
+
+                    for (const auto& process : currentProcesses)
+                    {
+                        if (process.pid == selectedProcessId)
+                        {
+                            selectedProcess = &process;
+                            break;
+                        }
+                    }
+
+                    if (selectedProcess != nullptr)
+                    {
+                        std::wstring details =
+                            L"Nombre: " + selectedProcess->name +
+                            L"\nPID: " + std::to_wstring(selectedProcess->pid) +
+                            L"\nMemoria: " +
+                            std::to_wstring(selectedProcess->memory / (1024 * 1024)) +
+                            L" MB" +
+                            L"\nHilos: " +
+                            std::to_wstring(selectedProcess->threads);
+
+                        SetWindowTextW(hProcessNameLabel, details.c_str());
+                    }
                 }
             }
         }
