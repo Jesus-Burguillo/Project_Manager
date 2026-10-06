@@ -16,6 +16,9 @@
     <Filter Include="process">
       <UniqueIdentifier>{b0d0bfa2-cdcf-4904-8eb0-e2a1a4c67178}</UniqueIdentifier>
     </Filter>
+    <Filter Include="system">
+      <UniqueIdentifier>{29751549-92a8-4096-8e70-448b2b524f91}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="framework.h">
@@ -33,6 +36,9 @@
     <ClInclude Include="ProcessManager.h">
       <Filter>process</Filter>
     </ClInclude>
+    <ClInclude Include="SystemInfo.h">
+      <Filter>system</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="project_manager.cpp">
@@ -40,6 +46,9 @@
     </ClCompile>
     <ClCompile Include="ProcessManager.cpp">
       <Filter>process</Filter>
+    </ClCompile>
+    <ClCompile Include="SystemInfo.cpp">
+      <Filter>system</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
